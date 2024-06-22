@@ -1,0 +1,120 @@
+diff --git a/api/types.go b/api/types.go
+index 95ed5d37..7b408cb5 100644
+--- a/api/types.go
++++ b/api/types.go
+@@ -112,2 +112,14 @@ type Message struct {
+ 
++// CompletionProbability is returned by llama.cpp if n_probs is set.
++type CompletionProbability struct {
++	Content string            `json:"content"`
++	Probs   []CompletionProbs `json:"probs"`
++}
++
++// CompletionProbs is a tuple of a human readable next token and the according probability.
++type CompletionProbs struct {
++	Prob    float64 `json:"prob"`
++	Content string  `json:"tok_str"`
++}
++
+ // ChatResponse is the response returned by [Client.Chat]. Its fields are
+@@ -122,2 +134,4 @@ type ChatResponse struct {
+ 
++	CompletionProbabilities []CompletionProbability `json:"completion_probabilities,omitempty"`
++
+ 	Metrics
+@@ -143,2 +157,3 @@ type Options struct {
+ 	NumPredict       int      `json:"num_predict,omitempty"`
++	NProbs           int      `json:"n_probs,omitempty"`
+ 	TopK             int      `json:"top_k,omitempty"`
+@@ -372,2 +387,5 @@ type GenerateResponse struct {
+ 
++	// Optional completion probabilities (chance + completion)
++	CompletionProbabilities []CompletionProbability `json:"completion_probabilities,omitempty"`
++
+ 	Metrics
+@@ -517,2 +535,3 @@ func DefaultOptions() Options {
+ 		Temperature:      0.8,
++		NProbs:           0,
+ 		TopK:             40,
+diff --git a/docs/api.md b/docs/api.md
+index 107b5211..c9a7f8f9 100644
+--- a/docs/api.md
++++ b/docs/api.md
+@@ -301,2 +301,3 @@ curl http://localhost:11434/api/generate -d '{
+     "tfs_z": 0.5,
++    "n_probs" : 0,
+     "typical_p": 0.7,
+diff --git a/llm/server.go b/llm/server.go
+index da83416e..3ca450a5 100644
+--- a/llm/server.go
++++ b/llm/server.go
+@@ -648,7 +648,8 @@ type ImageData struct {
+ type completion struct {
+-	Content      string `json:"content"`
+-	Model        string `json:"model"`
+-	Prompt       string `json:"prompt"`
+-	Stop         bool   `json:"stop"`
+-	StoppedLimit bool   `json:"stopped_limit"`
++	Content                 string                      `json:"content"`
++	CompletionProbabilities []api.CompletionProbability `json:"completion_probabilities,omitempty"`
++	Model                   string                      `json:"model"`
++	Prompt                  string                      `json:"prompt"`
++	Stop                    bool                        `json:"stop"`
++	StoppedLimit            bool                        `json:"stopped_limit"`
+ 
+@@ -670,9 +671,10 @@ type CompletionRequest struct {
+ type CompletionResponse struct {
+-	Content            string
+-	DoneReason         string
+-	Done               bool
+-	PromptEvalCount    int
+-	PromptEvalDuration time.Duration
+-	EvalCount          int
+-	EvalDuration       time.Duration
++	Content                 string
++	CompletionProbabilities []api.CompletionProbability
++	DoneReason              string
++	Done                    bool
++	PromptEvalCount         int
++	PromptEvalDuration      time.Duration
++	EvalCount               int
++	EvalDuration            time.Duration
+ }
+@@ -697,2 +699,3 @@ func (s *llmServer) Completion(ctx context.Context, req CompletionRequest, fn fu
+ 		"n_keep":            req.Options.NumKeep,
++		"n_probs":           req.Options.NProbs,
+ 		"main_gpu":          req.Options.MainGPU,
+@@ -808,3 +811,4 @@ func (s *llmServer) Completion(ctx context.Context, req CompletionRequest, fn fu
+ 				fn(CompletionResponse{
+-					Content: c.Content,
++					Content:                 c.Content,
++					CompletionProbabilities: c.CompletionProbabilities,
+ 				})
+@@ -819,8 +823,9 @@ func (s *llmServer) Completion(ctx context.Context, req CompletionRequest, fn fu
+ 				fn(CompletionResponse{
+-					Done:               true,
+-					DoneReason:         doneReason,
+-					PromptEvalCount:    c.Timings.PromptN,
+-					PromptEvalDuration: parseDurationMs(c.Timings.PromptMS),
+-					EvalCount:          c.Timings.PredictedN,
+-					EvalDuration:       parseDurationMs(c.Timings.PredictedMS),
++					Done:                    true,
++					CompletionProbabilities: c.CompletionProbabilities,
++					DoneReason:              doneReason,
++					PromptEvalCount:         c.Timings.PromptN,
++					PromptEvalDuration:      parseDurationMs(c.Timings.PromptMS),
++					EvalCount:               c.Timings.PredictedN,
++					EvalDuration:            parseDurationMs(c.Timings.PredictedMS),
+ 				})
+diff --git a/server/routes.go b/server/routes.go
+index 3d112e9f..ba630318 100644
+--- a/server/routes.go
++++ b/server/routes.go
+@@ -230,2 +230,3 @@ func (s *Server) GenerateHandler(c *gin.Context) {
+ 				Response:   r.Content,
++				CompletionProbabilities: r.CompletionProbabilities,
+ 				DoneReason: r.DoneReason,
+@@ -1366,2 +1367,3 @@ func (s *Server) ChatHandler(c *gin.Context) {
+ 				Done:       r.Done,
++				CompletionProbabilities: r.CompletionProbabilities,
+ 				DoneReason: r.DoneReason,

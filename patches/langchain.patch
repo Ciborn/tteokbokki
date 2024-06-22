@@ -1,0 +1,114 @@
+diff --git a/libs/community/langchain_community/llms/ollama.py b/libs/community/langchain_community/llms/ollama.py
+index 43e4fbd51..9df7b6f94 100644
+--- a/libs/community/langchain_community/llms/ollama.py
++++ b/libs/community/langchain_community/llms/ollama.py
+@@ -70,2 +70,6 @@ class _OllamaCommon(BaseLanguageModel):
+ 
++    n_probs: Optional[int] = None
++    """The number of probable completions to return, with their logprobs.
++    (Default: 0)"""
++
+     repeat_last_n: Optional[int] = None
+@@ -146,2 +150,3 @@ class _OllamaCommon(BaseLanguageModel):
+                 "num_predict": self.num_predict,
++                "n_probs": self.n_probs,
+                 "repeat_last_n": self.repeat_last_n,
+diff --git a/libs/langchain/langchain/chains/flare/base.py b/libs/langchain/langchain/chains/flare/base.py
+index 8070fc123..31da9c6ec 100644
+--- a/libs/langchain/langchain/chains/flare/base.py
++++ b/libs/langchain/langchain/chains/flare/base.py
+@@ -72,2 +72,23 @@ class _OpenAIResponseChain(_ResponseChain):
+ 
++class _OllamaResponseChain(_ResponseChain):
++    """Chain that generates responses from user input and context."""
++
++    llm: BaseLanguageModel
++
++    def _extract_tokens_and_log_probs(
++        self, generations: List[Generation]
++    ) -> Tuple[Sequence[str], Sequence[float]]:
++        tokens = []
++        log_probs = []
++        for gen in generations:
++            if gen.generation_info is None:
++                raise ValueError
++            
++            for prob in gen.generation_info['completion_probabilities']:
++                tokens.append(prob["probs"][0]["tok_str"])
++                log_probs.append(prob["probs"][0]["prob"])
++        
++        return tokens, log_probs
++
++
+ class QuestionGeneratorChain(LLMChain):
+@@ -95,3 +116,3 @@ def _low_confidence_spans(
+ ) -> List[str]:
+-    _low_idx = np.where(np.exp(log_probs) < min_prob)[0]
++    _low_idx = np.where(np.array(log_probs) < min_prob)[0]
+     low_idx = [i for i in _low_idx if re.search(r"\w", tokens[i])]
+@@ -207,3 +228,8 @@ class FlareChain(Chain):
+             )
+-            _input = {"user_input": user_input, "context": "", "response": response}
++            _input = {
++                "user_input": user_input,
++                # "context": "\n\n".join(d.page_content for d in self.retriever.invoke(user_input, )),
++                "context": "",
++                "response": response
++            }
+             tokens, log_probs = self.response_chain.generate_tokens_and_log_probs(
+@@ -218,2 +244,3 @@ class FlareChain(Chain):
+             )
++            print(tokens, log_probs, low_confidence_spans)
+             initial_response = response.strip() + " " + "".join(tokens)
+@@ -240,3 +267,8 @@ class FlareChain(Chain):
+     def from_llm(
+-        cls, llm: BaseLanguageModel, max_generation_len: int = 32, **kwargs: Any
++        cls,
++        llm: BaseLanguageModel,
++        prompt: BasePromptTemplate = PROMPT,
++        question_generator_prompt: BasePromptTemplate = QUESTION_GENERATOR_PROMPT,
++        max_generation_len: int = 32,
++        **kwargs: Any
+     ) -> FlareChain:
+@@ -252,15 +284,30 @@ class FlareChain(Chain):
+         """
++        # try:
++        #     from langchain_openai import OpenAI
++        # except ImportError:
++        #     raise ImportError(
++        #         "OpenAI is required for FlareChain. "
++        #         "Please install langchain-openai."
++        #         "pip install langchain-openai"
++        #     )
++        # question_gen_chain = QuestionGeneratorChain(llm=llm)
++        # response_llm = OpenAI(
++        #     max_tokens=max_generation_len, model_kwargs={"logprobs": 1}, temperature=0
++        # )
++        # response_chain = _OpenAIResponseChain(llm=response_llm)
++        # return cls(
++        #     question_generator_chain=question_gen_chain,
++        #     response_chain=response_chain,
++        #     **kwargs,
++        # )
++
+         try:
+-            from langchain_openai import OpenAI
++            from langchain_community.llms.ollama import Ollama
+         except ImportError:
+-            raise ImportError(
+-                "OpenAI is required for FlareChain. "
+-                "Please install langchain-openai."
+-                "pip install langchain-openai"
+-            )
+-        question_gen_chain = QuestionGeneratorChain(llm=llm)
+-        response_llm = OpenAI(
+-            max_tokens=max_generation_len, model_kwargs={"logprobs": 1}, temperature=0
+-        )
+-        response_chain = _OpenAIResponseChain(llm=response_llm)
++            raise ImportError("ollama > openai")
++
++        question_gen_chain = QuestionGeneratorChain(llm=llm, prompt=question_generator_prompt)
++        response_llm = Ollama(model='llama3', temperature=0, n_probs=1, num_predict=max_generation_len)
++        response_chain = _OllamaResponseChain(llm=response_llm, prompt=prompt)
++
+         return cls(
