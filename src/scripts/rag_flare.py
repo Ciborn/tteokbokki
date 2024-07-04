@@ -26,6 +26,7 @@ retriever = ParentDocumentRetriever(
     byte_store=store,
     child_splitter=child_splitter,
     parent_splitter=parent_splitter,
+    search_kwargs={"k": 1},
 )
 
 # Translated and adapted from https://smith.langchain.com/hub/rlm/rag-prompt

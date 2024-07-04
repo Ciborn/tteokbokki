@@ -14,7 +14,7 @@ index 43e4fbd51..9df7b6f94 100644
 +                "n_probs": self.n_probs,
                  "repeat_last_n": self.repeat_last_n,
 diff --git a/libs/langchain/langchain/chains/flare/base.py b/libs/langchain/langchain/chains/flare/base.py
-index 8070fc123..31da9c6ec 100644
+index 8070fc123..f8923cc6d 100644
 --- a/libs/langchain/langchain/chains/flare/base.py
 +++ b/libs/langchain/langchain/chains/flare/base.py
 @@ -72,2 +72,23 @@ class _OpenAIResponseChain(_ResponseChain):
@@ -46,21 +46,33 @@ index 8070fc123..31da9c6ec 100644
 -    _low_idx = np.where(np.exp(log_probs) < min_prob)[0]
 +    _low_idx = np.where(np.array(log_probs) < min_prob)[0]
      low_idx = [i for i in _low_idx if re.search(r"\w", tokens[i])]
-@@ -207,3 +228,8 @@ class FlareChain(Chain):
+@@ -152,3 +173,7 @@ class FlareChain(Chain):
+         for question in questions:
+-            docs.extend(self.retriever.invoke(question))
++            r = self.retriever.invoke(question)
++            docs.extend(r)
++            print('========================================================================')
++            print(r)
++            print('========================================================================')
+         context = "\n\n".join(d.page_content for d in docs)
+@@ -207,3 +232,8 @@ class FlareChain(Chain):
              )
 -            _input = {"user_input": user_input, "context": "", "response": response}
 +            _input = {
 +                "user_input": user_input,
-+                # "context": "\n\n".join(d.page_content for d in self.retriever.invoke(user_input, )),
-+                "context": "",
++                "context": "\n\n".join(d.page_content for d in self.retriever.invoke(user_input)),
++                # "context": "",
 +                "response": response
 +            }
              tokens, log_probs = self.response_chain.generate_tokens_and_log_probs(
-@@ -218,2 +244,3 @@ class FlareChain(Chain):
+@@ -218,4 +248,6 @@ class FlareChain(Chain):
              )
 +            print(tokens, log_probs, low_confidence_spans)
              initial_response = response.strip() + " " + "".join(tokens)
-@@ -240,3 +267,8 @@ class FlareChain(Chain):
+             if not low_confidence_spans:
++                print('EUUUUUUUUUUUUUUUUUUUUUUUUUUUUUH')
+                 response = initial_response
+@@ -240,3 +272,8 @@ class FlareChain(Chain):
      def from_llm(
 -        cls, llm: BaseLanguageModel, max_generation_len: int = 32, **kwargs: Any
 +        cls,
@@ -70,7 +82,7 @@ index 8070fc123..31da9c6ec 100644
 +        max_generation_len: int = 32,
 +        **kwargs: Any
      ) -> FlareChain:
-@@ -252,15 +284,30 @@ class FlareChain(Chain):
+@@ -252,15 +289,30 @@ class FlareChain(Chain):
          """
 +        # try:
 +        #     from langchain_openai import OpenAI
@@ -108,7 +120,7 @@ index 8070fc123..31da9c6ec 100644
 +            raise ImportError("ollama > openai")
 +
 +        question_gen_chain = QuestionGeneratorChain(llm=llm, prompt=question_generator_prompt)
-+        response_llm = Ollama(model='llama3', temperature=0, n_probs=1, num_predict=max_generation_len)
++        response_llm = Ollama(model='llama3:8b', temperature=0, n_probs=1, num_predict=max_generation_len)
 +        response_chain = _OllamaResponseChain(llm=response_llm, prompt=prompt)
 +
          return cls(
